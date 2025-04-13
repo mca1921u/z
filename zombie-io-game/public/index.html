@@ -5,238 +5,237 @@
   <title>Zombie.io Multiplayer</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #222; overflow: hidden; }
+    body { background: #222; overflow: hidden; color: white; font-family: Arial, sans-serif; }
     canvas { display: block; margin: auto; background: #333; border: 2px solid lime; }
+    #status {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      font-size: 1em;
+      color: yellow;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 5px 10px;
+      border-radius: 5px;
+      z-index: 1000;
+    }
   </style>
   <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
 </head>
 <body>
-<canvas id="game" width="800" height="500"></canvas>
-<script>
-const socket = io("http://localhost:3000");
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
+  <div id="status">🔄 Connecting to server...</div>
+  <canvas id="game" width="800" height="500"></canvas>
+  <script>
+    const socket = io();
+    const statusDiv = document.getElementById('status');
 
-const player = {
-  x: 400,
-  y: 250,
-  size: 20,
-  color: "cyan",
-  speed: 3,
-  health: 50,
-  maxHealth: 50,
-  lastDamageTime: 0,
-  lastHealTime: 0
-};
+    socket.on("connect", () => {
+      console.log("🔌 متصل بالسيرفر!");
+      statusDiv.textContent = "✅ Connected to server!";
+      statusDiv.style.color = "lightgreen";
+    });
 
-let players = {};
+    socket.on("disconnect", () => {
+      statusDiv.textContent = "❌ Disconnected from server!";
+      statusDiv.style.color = "red";
+    });
 
-socket.on("connect", () => {
-  console.log("🔌 متصل بالسيرفر!");
-});
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
 
-socket.on("currentPlayers", (data) => {
-  players = data;
-});
+    const player = {
+      x: 400, y: 250, size: 20, color: "cyan", speed: 3,
+      health: 50, maxHealth: 50,
+      lastDamageTime: 0, lastHealTime: 0
+    };
 
-socket.on("newPlayer", (data) => {
-  players[data.id] = data;
-});
+    let players = {};
 
-socket.on("playerMoved", (data) => {
-  if (players[data.id]) {
-    players[data.id].x = data.x;
-    players[data.id].y = data.y;
-  }
-});
+    socket.on("currentPlayers", data => players = data);
+    socket.on("newPlayer", data => players[data.id] = data);
+    socket.on("playerMoved", data => { if (players[data.id]) { players[data.id].x = data.x; players[data.id].y = data.y; } });
+    socket.on("playerDisconnected", id => delete players[id]);
 
-socket.on("playerDisconnected", (id) => {
-  delete players[id];
-});
+    setInterval(() => socket.emit("move", { x: player.x, y: player.y }), 100);
 
-setInterval(() => {
-  socket.emit("move", { x: player.x, y: player.y });
-}, 100);
+    const keys = {};
+    const bullets = [];
+    const zombies = [];
+    let kills = 0;
+    let weaponLevel = 1;
+    let spawnTimer = 0;
+    let ammo = 50;
+    let lastAmmoUpdate = 0;
+    const gameWidth = canvas.width;
+    const gameHeight = canvas.height;
 
-const keys = {};
-const bullets = [];
-const zombies = [];
-let kills = 0;
-let weaponLevel = 1;
-let spawnTimer = 0;
-let ammo = 50;
-let lastAmmoUpdate = 0;
-const gameWidth = canvas.width;
-const gameHeight = canvas.height;
-
-function drawPlayer() {
-  ctx.font = "20px Arial";
-  ctx.fillText("🤠", player.x - 10, player.y + 10);
-}
-
-function drawOtherPlayers() {
-  for (const id in players) {
-    if (id !== socket.id) {
-      const p = players[id];
+    function drawPlayer() {
       ctx.font = "20px Arial";
-      ctx.fillText("🤠", p.x - 10, p.y + 10);
+      ctx.fillText("🤠", player.x - 10, player.y + 10);
     }
-  }
-}
 
-function drawBullets() {
-  ctx.fillStyle = "yellow";
-  bullets.forEach((b, i) => {
-    b.x += b.vx;
-    b.y += b.vy;
-    ctx.beginPath();
-    ctx.arc(b.x, b.y, 5, 0, Math.PI * 2);
-    ctx.fill();
-    if (b.x < 0 || b.y < 0 || b.x > canvas.width || b.y > canvas.height) {
-      bullets.splice(i, 1);
-    }
-  });
-}
-
-function drawZombies() {
-  ctx.font = "20px Arial";
-  zombies.forEach((z, zi) => {
-    const angle = Math.atan2(player.y - z.y, player.x - z.x);
-    z.x += Math.cos(angle) * z.speed;
-    z.y += Math.sin(angle) * z.speed;
-    ctx.fillText("🧟", z.x - 10, z.y + 10);
-
-    const dx = z.x - player.x;
-    const dy = z.y - player.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist < z.size + player.size / 2) {
-      const now = Date.now();
-      if (now - player.lastDamageTime > 1000) {
-        player.health -= 10;
-        player.lastDamageTime = now;
-        if (player.health <= 0) {
-          alert("Game Over! قتلت: " + kills + " زومبي");
-          document.location.reload();
+    function drawOtherPlayers() {
+      for (const id in players) {
+        if (id !== socket.id) {
+          const p = players[id];
+          ctx.font = "20px Arial";
+          ctx.fillText("🤠", p.x - 10, p.y + 10);
         }
       }
     }
 
-    bullets.forEach((b, bi) => {
-      const dx = z.x - b.x;
-      const dy = z.y - b.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < z.size + 5) {
-        zombies.splice(zi, 1);
-        bullets.splice(bi, 1);
-        kills++;
-        if (kills % 30 === 0) weaponLevel++;
+    function drawBullets() {
+      ctx.fillStyle = "yellow";
+      bullets.forEach((b, i) => {
+        b.x += b.vx;
+        b.y += b.vy;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+        if (b.x < 0 || b.y < 0 || b.x > canvas.width || b.y > canvas.height) {
+          bullets.splice(i, 1);
+        }
+      });
+    }
+
+    function drawZombies() {
+      ctx.font = "20px Arial";
+      zombies.forEach((z, zi) => {
+        const angle = Math.atan2(player.y - z.y, player.x - z.x);
+        z.x += Math.cos(angle) * z.speed;
+        z.y += Math.sin(angle) * z.speed;
+        ctx.fillText("🧟", z.x - 10, z.y + 10);
+
+        const dx = z.x - player.x;
+        const dy = z.y - player.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < z.size + player.size / 2) {
+          const now = Date.now();
+          if (now - player.lastDamageTime > 1000) {
+            player.health -= 10;
+            player.lastDamageTime = now;
+            if (player.health <= 0) {
+              alert("Game Over! قتلت: " + kills + " زومبي");
+              document.location.reload();
+            }
+          }
+        }
+
+        bullets.forEach((b, bi) => {
+          const dx = z.x - b.x;
+          const dy = z.y - b.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < z.size + 5) {
+            zombies.splice(zi, 1);
+            bullets.splice(bi, 1);
+            kills++;
+            if (kills % 30 === 0) weaponLevel++;
+          }
+        });
+      });
+    }
+
+    function drawHealthBar() {
+      const barWidth = 200;
+      const barHeight = 20;
+      const healthRatio = player.health / player.maxHealth;
+      ctx.fillStyle = "gray";
+      ctx.fillRect(10, 90, barWidth, barHeight);
+      ctx.fillStyle = "lime";
+      ctx.fillRect(10, 90, barWidth * healthRatio, barHeight);
+      ctx.strokeStyle = "white";
+      ctx.strokeRect(10, 90, barWidth, barHeight);
+    }
+
+    function drawUI() {
+      ctx.fillStyle = "white";
+      ctx.font = "16px Arial";
+      ctx.fillText("Kills: " + kills, 10, 20);
+      ctx.fillText("Weapon Level: " + weaponLevel, 10, 40);
+      ctx.fillText("Ammo: " + ammo, 10, 60);
+      drawHealthBar();
+    }
+
+    function spawnZombie() {
+      const edge = Math.floor(Math.random() * 4);
+      let x, y;
+      if (edge === 0) { x = Math.random() * canvas.width; y = 0; }
+      if (edge === 1) { x = canvas.width; y = Math.random() * canvas.height; }
+      if (edge === 2) { x = Math.random() * canvas.width; y = canvas.height; }
+      if (edge === 3) { x = 0; y = Math.random() * canvas.height; }
+      zombies.push({ x, y, size: 15, speed: 1.2 });
+    }
+
+    function shoot() {
+      const mouseAngle = Math.atan2(mouse.y - player.y, mouse.x - player.x);
+      for (let i = 0; i < weaponLevel; i++) {
+        const spread = (i - (weaponLevel - 1) / 2) * 0.1;
+        bullets.push({
+          x: player.x,
+          y: player.y,
+          vx: Math.cos(mouseAngle + spread) * 5,
+          vy: Math.sin(mouseAngle + spread) * 5
+        });
+      }
+      ammo--;
+    }
+
+    function update() {
+      if (keys["ArrowUp"] || keys["w"]) player.y = Math.max(player.y - player.speed, player.size / 2);
+      if (keys["ArrowDown"] || keys["s"]) player.y = Math.min(player.y + player.speed, gameHeight - player.size / 2);
+      if (keys["ArrowLeft"] || keys["a"]) player.x = Math.max(player.x - player.speed, player.size / 2);
+      if (keys["ArrowRight"] || keys["d"]) player.x = Math.min(player.x + player.speed, gameWidth - player.size / 2);
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      drawPlayer();
+      drawOtherPlayers();
+      drawBullets();
+      drawZombies();
+      drawUI();
+
+      spawnTimer++;
+      if (spawnTimer > 30) {
+        spawnZombie();
+        spawnTimer = 0;
+      }
+
+      const ammoRegenInterval = kills >= 15 ? 500 : 1000;
+      if (Date.now() - lastAmmoUpdate >= ammoRegenInterval && ammo < 50) {
+        ammo++;
+        lastAmmoUpdate = Date.now();
+      }
+
+      if (Date.now() - player.lastHealTime >= 5000 && player.health < player.maxHealth) {
+        player.health = Math.min(player.health + 10, player.maxHealth);
+        player.lastHealTime = Date.now();
+      }
+
+      requestAnimationFrame(update);
+    }
+
+    window.addEventListener("keydown", e => {
+      keys[e.key] = true;
+      if (e.key === " " && ammo > 0) {
+        shoot();
       }
     });
-  });
-}
 
-function drawHealthBar() {
-  const barWidth = 200;
-  const barHeight = 20;
-  const healthRatio = player.health / player.maxHealth;
-  ctx.fillStyle = "gray";
-  ctx.fillRect(10, 90, barWidth, barHeight);
-  ctx.fillStyle = "lime";
-  ctx.fillRect(10, 90, barWidth * healthRatio, barHeight);
-  ctx.strokeStyle = "white";
-  ctx.strokeRect(10, 90, barWidth, barHeight);
-}
+    window.addEventListener("keyup", e => keys[e.key] = false);
 
-function drawUI() {
-  ctx.fillStyle = "white";
-  ctx.font = "16px Arial";
-  ctx.fillText("Kills: " + kills, 10, 20);
-  ctx.fillText("Weapon Level: " + weaponLevel, 10, 40);
-  ctx.fillText("Ammo: " + ammo, 10, 60);
-  drawHealthBar();
-}
-
-function spawnZombie() {
-  const edge = Math.floor(Math.random() * 4);
-  let x, y;
-  if (edge === 0) { x = Math.random() * canvas.width; y = 0; }
-  if (edge === 1) { x = canvas.width; y = Math.random() * canvas.height; }
-  if (edge === 2) { x = Math.random() * canvas.width; y = canvas.height; }
-  if (edge === 3) { x = 0; y = Math.random() * canvas.height; }
-  zombies.push({ x, y, size: 15, speed: 1.2 });
-}
-
-function shoot() {
-  const mouseAngle = Math.atan2(mouse.y - player.y, mouse.x - player.x);
-  for (let i = 0; i < weaponLevel; i++) {
-    const spread = (i - (weaponLevel - 1) / 2) * 0.1;
-    bullets.push({
-      x: player.x,
-      y: player.y,
-      vx: Math.cos(mouseAngle + spread) * 5,
-      vy: Math.sin(mouseAngle + spread) * 5
+    canvas.addEventListener("mousedown", e => {
+      if (e.button === 0 && ammo > 0) {
+        shoot();
+      }
     });
-  }
-  ammo--;
-}
 
-function update() {
-  if (keys["ArrowUp"] || keys["w"]) player.y = Math.max(player.y - player.speed, player.size / 2);
-  if (keys["ArrowDown"] || keys["s"]) player.y = Math.min(player.y + player.speed, gameHeight - player.size / 2);
-  if (keys["ArrowLeft"] || keys["a"]) player.x = Math.max(player.x - player.speed, player.size / 2);
-  if (keys["ArrowRight"] || keys["d"]) player.x = Math.min(player.x + player.speed, gameWidth - player.size / 2);
+    const mouse = { x: 0, y: 0 };
+    canvas.addEventListener("mousemove", e => {
+      const rect = canvas.getBoundingClientRect();
+      mouse.x = e.clientX - rect.left;
+      mouse.y = e.clientY - rect.top;
+    });
 
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  drawPlayer();
-  drawOtherPlayers();
-  drawBullets();
-  drawZombies();
-  drawUI();
-
-  spawnTimer++;
-  if (spawnTimer > 30) {
-    spawnZombie();
-    spawnTimer = 0;
-  }
-
-  const ammoRegenInterval = kills >= 15 ? 500 : 1000;
-  if (Date.now() - lastAmmoUpdate >= ammoRegenInterval && ammo < 50) {
-    ammo++;
-    lastAmmoUpdate = Date.now();
-  }
-
-  if (Date.now() - player.lastHealTime >= 5000 && player.health < player.maxHealth) {
-    player.health = Math.min(player.health + 10, player.maxHealth);
-    player.lastHealTime = Date.now();
-  }
-
-  requestAnimationFrame(update);
-}
-
-window.addEventListener("keydown", e => {
-  keys[e.key] = true;
-  if (e.key === " " && ammo > 0) {
-    shoot();
-  }
-});
-
-window.addEventListener("keyup", e => keys[e.key] = false);
-
-canvas.addEventListener("mousedown", e => {
-  if (e.button === 0 && ammo > 0) {
-    shoot();
-  }
-});
-
-const mouse = { x: 0, y: 0 };
-canvas.addEventListener("mousemove", e => {
-  const rect = canvas.getBoundingClientRect();
-  mouse.x = e.clientX - rect.left;
-  mouse.y = e.clientY - rect.top;
-});
-
-update();
-</script>
+    update();
+  </script>
 </body>
 </html>
